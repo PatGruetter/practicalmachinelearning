@@ -1,0 +1,118 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "PG"
+date: "2 Juni 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Getting and loading data
+
+Getting and loading training set:
+
+```{r loadtraining, cache = TRUE}
+fileUrl.training <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileUrl.training,
+              destfile = "C:/Users/Patrick/Documents/Coursera/DataScience/Assignments/Course8/pml-training.csv")
+# Having a look at the csv-file shows that there are missings as blanks and NAs as well as errors called #DIV/0! which I all mark as NA:
+training <- read.csv("C:/Users/Patrick/Documents/Coursera/DataScience/Assignments/Course8/pml-training.csv", na.strings = c("NA","","#DIV/0!"))
+```
+
+
+Getting and loading training set: 
+
+```{r loadtesting, cache = TRUE}
+fileUrl.testing <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl.testing,
+              destfile = "C:/Users/Patrick/Documents/Coursera/DataScience/Assignments/Course8/pml-testing.csv")
+testing <- read.csv("C:/Users/Patrick/Documents/Coursera/DataScience/Assignments/Course8/pml-testing.csv", na.strings = c("NA","","#DIV/0!"))
+```
+
+
+### Exploring and preparing the data
+
+```{r exploretesting, results="hide"}
+dim(training); dim(testing)
+str(training)
+```
+
+Having a look at the output (which is not shown here for reasons of legibility), one can see that a lot of variables have many NAs. Let's eliminate those variables that contain more than 50% NAs as it does not make sense to impute missings in those cases:
+
+```{r excludeNAs}
+exclude <- as.vector(sapply(training, function(x) ifelse(sum(is.na(x))/length(x)>0.5,1,0)))
+
+train <- training[,exclude==0]
+test <- testing[,exclude==0]
+```
+
+Let's have a look at the data now using summary():
+
+```{r summarytraining, results="hide"}
+summary(train)
+```
+
+Again, I do not show the output of this function due to legibility. Our output variable "classe" is still included, which is perfect. As the variable "X" is the same as the row number, I also exclude that from the test set as it is not allowed to have an influence on the predictions:
+
+```{r excludeX}
+train <- train[,!names(train) %in% c("X")]
+test <- test[,!names(test) %in% c("X")]
+```
+
+Let's check whether the remaining potential predictors contain NAs and see how many variables are left:
+
+```{r checkNAs}
+all(sapply(train, function(x) sum(is.na(x)))==0)
+dim(train)
+```
+
+Obviously, the remaining variables do not contain any NAs. Hence, no imputation is needed and we can start building our model based on 58 predictors and one outcome variable.
+
+
+### Building a classification model
+
+As I had performance problems fitting a random forest with cross validation, I did some research in the discussion forum and found this artical by one of the intructors: https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md.
+Hence, I follow this approach closely using parallel processing to fit a random forest model using 5-fold cross validation (which is a common number for k-fold CV):
+
+```{r loadlibraries_modelling, message=FALSE, warning=FALSE}
+library(caret)
+library(parallel)
+library(doParallel)
+
+# configure parallel processing
+cluster <- makeCluster(detectCores() - 1) # convention to leave 1 core for OS
+registerDoParallel(cluster)
+
+set.seed(12345)
+
+# model fitting using a random forest and 5-fold cross validation
+modFit <- train(classe ~., data = train, method = "rf", trControl = trainControl(method = "cv", number = 5, allowParallel = TRUE))
+
+# De-register parallel processing cluster
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+Let's have a look at the model and its accuracy:
+
+```{r output}
+modFit
+modFit$resample
+mean(modFit$resample$Accuracy) # Estimate of accuracy
+```
+
+We can see that a model was chosen best considering 41 variables. As 5-fold cross validation splits data into 5 subsets of test and training, the estimated out-of-sample accuracy is given by the mean of the accuracies of each of the 5 subsets. This equals exaclty the accuracy given in the model output where mtry = 41. So, the out-of-sample accuracy is 99.9%.
+
+
+### Prediction on the test set
+
+We can now apply our model on the test set:
+
+```{r prediction}
+pred <- predict(modFit, test)
+pred
+```
+
+These are the predictions for all 20 observations of the test set.
